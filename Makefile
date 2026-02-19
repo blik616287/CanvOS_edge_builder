@@ -54,8 +54,8 @@ BFB_URL           := https://github.com/blik616287/CanvOS_edge_builder/releases/
 DOCA_DEB_FILE     ?= $(DOCA_DEB_NAME)
 BFB_FILE          ?= $(BFB_NAME)
 
-# Derived values (read from CanvOS git tags)
-PE_VERSION        := $(shell cd $(CANVOS_DIR) && git describe --abbrev=0 --tags 2>/dev/null || echo "unknown")
+# Derived values (must match PE_VERSION in src/Earthfile)
+PE_VERSION        := $(shell grep -m1 '^ARG PE_VERSION=' $(SRC_DIR)/Earthfile 2>/dev/null | cut -d= -f2 || echo "unknown")
 PROVIDER_IMAGE    := $(IMAGE_REGISTRY)/$(IMAGE_REPO):$(K8S_DISTRIBUTION)-$(K8S_VERSION)-$(PE_VERSION)-$(CUSTOM_TAG)
 INSTALLER_IMAGE   := palette-installer-image:$(PE_VERSION)-$(CUSTOM_TAG)
 
@@ -104,6 +104,7 @@ setup: ## Apply src/ files into CanvOS/ (resets CanvOS/ first)
 		cp "$(SRC_DIR)/$$f" "$(CANVOS_DIR)/$$f"; \
 		echo "  [OK] src/$$f"; \
 	done
+	@touch "$(CANVOS_DIR)/.empty-placeholder"
 	@echo ""
 	@echo "Applied $(words $(OVERLAY_FILES)) files to CanvOS/"
 

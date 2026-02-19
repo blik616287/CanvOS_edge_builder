@@ -62,10 +62,10 @@ RUN if [ "${EDGE_APPLIANCE}" = "true" ] && [ "${OS_DISTRIBUTION}" = "ubuntu" ]; 
 # and break DOCA's DKMS module dependencies.
 #
 # DOCA_DEB_PATH accepts a local file path OR a URL (http:// / https://).
-# When a URL is provided, DOCA_DEB_LOCAL must be set to /dev/null so COPY doesn't fail.
+# When a URL is provided, DOCA_DEB_LOCAL must be set to .empty-placeholder so COPY doesn't fail.
 # When a local file is provided, DOCA_DEB_LOCAL should equal DOCA_DEB_PATH.
 ARG DOCA_DEB_LOCAL
-COPY ${DOCA_DEB_LOCAL:-/dev/null} /tmp/doca-host-local.deb
+COPY ${DOCA_DEB_LOCAL:-.empty-placeholder} /tmp/doca-host-local.deb
 RUN if [ "${EDGE_APPLIANCE}" = "true" ] && [ "${OS_DISTRIBUTION}" = "ubuntu" ]; then \
     case "${DOCA_DEB_PATH}" in \
         http://*|https://*) \
@@ -93,10 +93,10 @@ RUN if [ "${EDGE_APPLIANCE}" = "true" ] && [ "${OS_DISTRIBUTION}" = "ubuntu" ]; 
 # Stage BFB firmware bundle for BlueField-3 adapters
 #
 # BFB_PATH accepts a local file path OR a URL (http:// / https://).
-# When a URL is provided, BFB_LOCAL must be set to /dev/null so COPY doesn't fail.
+# When a URL is provided, BFB_LOCAL must be set to .empty-placeholder so COPY doesn't fail.
 # When a local file is provided, BFB_LOCAL should equal BFB_PATH.
 ARG BFB_LOCAL
-COPY ${BFB_LOCAL:-/dev/null} /tmp/bfb-local
+COPY ${BFB_LOCAL:-.empty-placeholder} /tmp/bfb-local
 RUN if [ "${EDGE_APPLIANCE}" = "true" ] && [ -n "${BFB_FILENAME}" ]; then \
     case "${BFB_PATH}" in \
         http://*|https://*) \

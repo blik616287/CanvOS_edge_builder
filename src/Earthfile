@@ -686,8 +686,8 @@ base-image:
     # When DOCA_DEB_PATH or BFB_PATH is a URL, set the LOCAL variant to /dev/null
     # so the Dockerfile COPY instruction doesn't try to copy a URL as a file path.
     # The Dockerfile RUN will then use curl to fetch the URL instead.
-    LET DOCA_DEB_LOCAL=/dev/null
-    LET BFB_LOCAL=/dev/null
+    LET DOCA_DEB_LOCAL=.empty-placeholder
+    LET BFB_LOCAL=.empty-placeholder
     IF [ -n "$DOCA_DEB_PATH" ] && ! echo "$DOCA_DEB_PATH" | grep -q '^https\?://'
         SET DOCA_DEB_LOCAL=$DOCA_DEB_PATH
     END
