@@ -688,11 +688,13 @@ base-image:
     # The Dockerfile RUN will then use curl to fetch the URL instead.
     LET DOCA_DEB_LOCAL=.empty-placeholder
     LET BFB_LOCAL=.empty-placeholder
-    IF [ -n "$DOCA_DEB_PATH" ] && ! echo "$DOCA_DEB_PATH" | grep -q '^https\?://'
-        SET DOCA_DEB_LOCAL=$DOCA_DEB_PATH
-    END
-    IF [ -n "$BFB_PATH" ] && ! echo "$BFB_PATH" | grep -q '^https\?://'
-        SET BFB_LOCAL=$BFB_PATH
+    IF [ "$EDGE_APPLIANCE" = "true" ]
+        IF [ -n "$DOCA_DEB_PATH" ] && ! echo "$DOCA_DEB_PATH" | grep -q '^https\?://'
+            SET DOCA_DEB_LOCAL=$DOCA_DEB_PATH
+        END
+        IF [ -n "$BFB_PATH" ] && ! echo "$BFB_PATH" | grep -q '^https\?://'
+            SET BFB_LOCAL=$BFB_PATH
+        END
     END
     FROM DOCKERFILE --build-arg BASE=$BASE_IMAGE \
     --build-arg OS_DISTRIBUTION=$OS_DISTRIBUTION --build-arg OS_VERSION=$OS_VERSION \
