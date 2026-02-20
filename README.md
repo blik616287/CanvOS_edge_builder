@@ -19,6 +19,8 @@ CanvOS_edge_builder/
 │       ├── etc/modprobe.d/ib_core.conf
 │       ├── etc/lldpd.d/rcp-lldpd.conf
 │       └── etc/modules-load.d/nfsrdma.conf
+│   └── hack/
+│       └── launch-qemu.sh          # QEMU smoke test launcher
 ├── redist/               # Local firmware downloads (gitignored)
 ├── build/                # Build output — ISO + checksums (gitignored)
 └── CanvOS/               # Upstream clone (gitignored)
@@ -28,22 +30,28 @@ CanvOS_edge_builder/
 
 - Docker 29.x+
 - ~30 GB free disk space
-- CanvOS cloned into `CanvOS/`:
-  ```bash
-  git clone https://github.com/spectrocloud/CanvOS.git
-  ```
 
 ## Quick Start
 
-### Build from URLs (no local downloads needed)
-
 ```bash
+# 1. Clone this repo and initialize the CanvOS submodule
+git clone https://github.com/blik616287/CanvOS_edge_builder.git
+cd CanvOS_edge_builder
+git submodule update --init
+
+# 2. Verify prerequisites
+make check-prereqs
+
+# 3. Build the Edge Appliance image (fetches DOCA/BFB from URLs)
 make build-url
+
+# 4. Verify the build
+make test
 ```
 
-This fetches the DOCA .deb and BFB firmware directly from URLs during the Docker build.
+### Build from local firmware files
 
-### Build from local files
+If you prefer to download firmware first (or have limited build-time network access):
 
 ```bash
 make download    # Download firmware to redist/ (~2.1 GB)
@@ -54,6 +62,14 @@ Or in one step:
 
 ```bash
 make build-local
+```
+
+### Standard (non-Edge) build
+
+To build a standard CanvOS image without DOCA/BFB:
+
+```bash
+make build-provider EDGE_APPLIANCE=false
 ```
 
 ### Full pipeline
@@ -80,6 +96,7 @@ make all         # check-prereqs → build → test
 | `make test` | Verify built image contents + ISO |
 | `make verify` | Verify DOCA, BFB, nodeprep, overlays in the built image |
 | `make verify-iso` | Check that the installer ISO was created |
+| `make smoke-test` | Launch QEMU VM from installer ISO for interactive testing |
 | `make clean` | Full cleanup: build artifacts, images, redist/, revert CanvOS/ |
 | `make clean-earthly` | Remove Earthly buildkit container and cache |
 
@@ -161,6 +178,51 @@ Baked into the immutable rootfs via `src/overlay/files/`:
 | `etc/lldpd.d/rcp-lldpd.conf` | LLDP discovery configuration |
 | `etc/modules-load.d/nfsrdma.conf` | Auto-loads NFSoRDMA kernel modules (rpcrdma, xprtrdma, svcrdma) |
 
+## QEMU Smoke Testing
+
+The `make smoke-test` target boots the installer ISO in a local QEMU VM for interactive verification. Requires KVM and QEMU installed on the host.
+
+```bash
+make build-iso    # Build the installer ISO first
+make smoke-test   # Launch QEMU VM
+```
+
+The VM boots into the Kairos live environment with serial console. Use `Ctrl+A X` to exit QEMU.
+
+What to verify in the QEMU smoke test:
+- VM reaches the Kairos login prompt ("Welcome to Kairos!")
+- `kairos-agent.service` and `kairos-installer.service` start
+- `lldpd.service` starts (confirms overlay config)
+- `mst start` fails gracefully when no NVIDIA hardware is present (expected in QEMU)
+
+The QEMU script lives at `src/hack/launch-qemu.sh` and is overlaid into `CanvOS/hack/` at build time. It can be customized via environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MEMORY` | `10096` | VM memory in MB |
+| `CORES` | `5` | Number of CPU cores |
+| `CPU` | `host` | CPU model |
+
+## Standard vs Edge Appliance Builds
+
+The build system supports both standard CanvOS images and Edge Appliance images with DOCA pre-installed. Set `EDGE_APPLIANCE=false` to build a standard image without DOCA/BFB.
+
+```bash
+make build-provider EDGE_APPLIANCE=false    # Standard image (no DOCA)
+make build-provider                          # Edge Appliance image (DOCA included)
+```
+
+| Attribute | Edge Appliance | Standard |
+|-----------|---------------|----------|
+| Image size | ~7 GB | ~3.5 GB |
+| Package count | ~700 | ~430 |
+| DOCA/OFED | Installed | Not installed |
+| gcc-14 | Installed | Not installed |
+| mst tools | Installed | Not installed |
+| BFB firmware | 1.5 GB staged | Not present |
+| nodeprep.sh | Present | Not present |
+| Overlay configs | Present | Present |
+
 ## Deployment Notes
 
 ### PERSISTENT_STATE_PATHS
@@ -211,5 +273,6 @@ The target profile stack (AI-RA-Infra-Agent):
 ### Known Constraints
 
 - **DOCA kernel compatibility**: DOCA 3.2.1 DKMS modules require the GA kernel (6.8.x on Ubuntu 24.04). The HWE kernel (6.14.x) is not supported. `UPDATE_KERNEL=false` prevents this.
-- **No UKI/Trusted Boot**: DOCA makes images too large for the EFI partition. Grub-based boot only.
+- **No UKI/Trusted Boot**: The Edge Appliance image (~7 GB) far exceeds UKI/EFI partition limits (~1 GB). Grub-based boot is required.
 - **Ubuntu version must match**: The DOCA .deb and BFB firmware are version-specific. A 22.04 .deb will not work on a 24.04 image.
+- **Image size**: Edge Appliance images are significantly larger than standard CanvOS images (~7 GB vs ~3.5 GB) due to DOCA packages and 1.5 GB BFB firmware.
