@@ -71,7 +71,8 @@ OVERLAY_FILES := \
 	overlay/files/etc/modprobe.d/blacklist-nouveau.conf \
 	overlay/files/etc/modprobe.d/ib_core.conf \
 	overlay/files/etc/lldpd.d/rcp-lldpd.conf \
-	overlay/files/etc/modules-load.d/nfsrdma.conf
+	overlay/files/etc/modules-load.d/nfsrdma.conf \
+	hack/launch-qemu.sh
 
 ##@ Help
 .PHONY: help
@@ -109,32 +110,36 @@ setup: ## Apply src/ files into CanvOS/ (resets CanvOS/ first)
 	@echo "Applied $(words $(OVERLAY_FILES)) files to CanvOS/"
 
 .PHONY: setup-firmware
-setup-firmware: ## Copy redist/ firmware into CanvOS/ (skipped for URLs)
+setup-firmware: ## Copy redist/ firmware into CanvOS/ (skipped for URLs or non-Edge builds)
 	@echo "=== Staging firmware into CanvOS/ ==="
-	@case "$(DOCA_DEB_FILE)" in \
-		http://*|https://*) echo "  [SKIP] DOCA — URL, downloaded during build" ;; \
-		*) \
-			if [ -f "$(REDIST_DIR)/$(DOCA_DEB_FILE)" ]; then \
-				cp "$(REDIST_DIR)/$(DOCA_DEB_FILE)" "$(CANVOS_DIR)/$(DOCA_DEB_FILE)"; \
-				echo "  [OK] $(DOCA_DEB_FILE)"; \
-			else \
-				echo "  [FAIL] redist/$(DOCA_DEB_FILE) not found"; \
-				echo "         Download to redist/ from: https://www.mellanox.com/downloads/DOCA/DOCA_v3.2.1/host/"; \
-				exit 1; \
-			fi ;; \
-	esac
-	@case "$(BFB_FILE)" in \
-		http://*|https://*) echo "  [SKIP] BFB — URL, downloaded during build" ;; \
-		*) \
-			if [ -f "$(REDIST_DIR)/$(BFB_FILE)" ]; then \
-				cp "$(REDIST_DIR)/$(BFB_FILE)" "$(CANVOS_DIR)/$(BFB_FILE)"; \
-				echo "  [OK] $(BFB_FILE)"; \
-			else \
-				echo "  [FAIL] redist/$(BFB_FILE) not found"; \
-				echo "         Download to redist/ from: https://content.mellanox.com/BlueField/BFBs/"; \
-				exit 1; \
-			fi ;; \
-	esac
+	@if [ "$(EDGE_APPLIANCE)" != "true" ]; then \
+		echo "  [SKIP] EDGE_APPLIANCE is not true — no firmware needed"; \
+	else \
+		case "$(DOCA_DEB_FILE)" in \
+			http://*|https://*) echo "  [SKIP] DOCA — URL, downloaded during build" ;; \
+			*) \
+				if [ -f "$(REDIST_DIR)/$(DOCA_DEB_FILE)" ]; then \
+					cp "$(REDIST_DIR)/$(DOCA_DEB_FILE)" "$(CANVOS_DIR)/$(DOCA_DEB_FILE)"; \
+					echo "  [OK] $(DOCA_DEB_FILE)"; \
+				else \
+					echo "  [FAIL] redist/$(DOCA_DEB_FILE) not found"; \
+					echo "         Download to redist/ from: https://www.mellanox.com/downloads/DOCA/DOCA_v3.2.1/host/"; \
+					exit 1; \
+				fi ;; \
+		esac; \
+		case "$(BFB_FILE)" in \
+			http://*|https://*) echo "  [SKIP] BFB — URL, downloaded during build" ;; \
+			*) \
+				if [ -f "$(REDIST_DIR)/$(BFB_FILE)" ]; then \
+					cp "$(REDIST_DIR)/$(BFB_FILE)" "$(CANVOS_DIR)/$(BFB_FILE)"; \
+					echo "  [OK] $(BFB_FILE)"; \
+				else \
+					echo "  [FAIL] redist/$(BFB_FILE) not found"; \
+					echo "         Download to redist/ from: https://content.mellanox.com/BlueField/BFBs/"; \
+					exit 1; \
+				fi ;; \
+		esac; \
+	fi
 
 .PHONY: download
 download: ## Download firmware files to redist/
@@ -465,6 +470,21 @@ verify-iso: ## Check that installer ISO was built
 test: verify verify-iso ## Run all verification checks (image + ISO)
 	@echo ""
 	@echo "All tests passed."
+
+.PHONY: smoke-test
+smoke-test: ## Launch QEMU VM from installer ISO for smoke testing
+	@if [ ! -f "$(BUILD_DIR)/$(ISO_NAME).iso" ]; then \
+		echo "[FAIL] $(BUILD_DIR)/$(ISO_NAME).iso not found — run 'make build' or 'make build-iso' first"; \
+		exit 1; \
+	fi
+	@echo "=== Launching QEMU smoke test ==="
+	@echo "  ISO: $(BUILD_DIR)/$(ISO_NAME).iso"
+	@echo "  Memory: $${MEMORY:-10096}MB  Cores: $${CORES:-5}"
+	@echo ""
+	@echo "  Boot the VM in 'Kairos (manual)' mode to test nodeprep."
+	@echo "  Press Ctrl+A X to exit QEMU."
+	@echo ""
+	cd $(CANVOS_DIR)/hack && ./launch-qemu.sh $(CURDIR)/$(BUILD_DIR)/$(ISO_NAME).iso
 
 ##@ Cleanup
 .PHONY: clean
