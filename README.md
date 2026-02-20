@@ -165,7 +165,7 @@ Baked into the immutable rootfs via `src/overlay/files/`:
 
 ### PERSISTENT_STATE_PATHS
 
-Edge Appliance deployments must add these paths to `PERSISTENT_STATE_PATHS` in the Kairos user-data:
+Edge Appliance deployments must add these paths to `PERSISTENT_STATE_PATHS` in the Kairos agent install user-data so that overlay configurations survive reboots:
 
 ```
 /etc/default
@@ -174,7 +174,26 @@ Edge Appliance deployments must add these paths to `PERSISTENT_STATE_PATHS` in t
 /etc/modules-load.d
 ```
 
-`/opt` is already persistent by default.
+`/opt` is already persistent by default (includes `/opt/spectrocloud/` for nodeprep and BFB firmware).
+
+Example `user-data` YAML snippet for the Kairos `install` block:
+
+```yaml
+install:
+  bind_mounts:
+    - /etc/default
+    - /etc/lldpd.d
+    - /etc/modprobe.d
+    - /etc/modules-load.d
+  grub_options:
+    extra_cmdline: "intel_iommu=on iommu=pt"
+```
+
+These paths are added to the existing Kairos `PERSISTENT_STATE_PATHS` list alongside the defaults (`/etc/systemd`, `/etc/ssh`, `/etc/kubernetes`, `/opt`, etc.).
+
+### `/run/mellanox` — Boot-Time Workaround
+
+`/run` is a tmpfs filesystem that is cleared on every reboot. The `/run/mellanox` directory (used by DOCA/OFED tools like `mst status`) does not need to be in `PERSISTENT_STATE_PATHS`. Instead, `nodeprep.sh` recreates it at runtime during the `fn_inventory_hw` and `fn_config_stage` stages via `mst start`, which sets up `/run/mellanox` automatically each boot.
 
 ### Palette Cluster Profile
 
