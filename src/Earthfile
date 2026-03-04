@@ -84,7 +84,7 @@ ARG FORCE_INTERACTIVE_INSTALL=false
 
 # Edge Appliance Mode (AI-RA-Infra / DOCA)
 ARG EDGE_APPLIANCE
-ARG DOCA_DEB_PATH
+ARG DOCA_VERSION
 ARG BFB_PATH
 ARG BFB_FILENAME
 
@@ -512,8 +512,30 @@ provider-image:
 
     IF [ "$K8S_DISTRIBUTION" = "kubeadm" ] || [ "$K8S_DISTRIBUTION" = "kubeadm-fips" ] || [ "$K8S_DISTRIBUTION" = "nodeadm" ]
         ARG BASE_K8S_VERSION=$K8S_VERSION
-        IF [ "$OS_DISTRIBUTION" = "ubuntu" ] &&  [ "$ARCH" = "amd64" ] && [ "$K8S_DISTRIBUTION" = "kubeadm" ] && [ "$EDGE_APPLIANCE" != "true" ]
-            RUN kernel=$(printf '%s\n' /lib/modules/* | xargs -n1 basename | sort -V | tail -1) && if ! ls /usr/src | grep linux-headers-$kernel; then apt-get update && apt-get install -y "linux-headers-${kernel}"; fi
+        IF [ "$OS_DISTRIBUTION" = "ubuntu" ] &&  [ "$ARCH" = "amd64" ] && [ "$K8S_DISTRIBUTION" = "kubeadm" ]
+            IF [ "$EDGE_APPLIANCE" = "true" ]
+                # For Edge Appliance: disable DKMS autoinstall hook during header install to prevent
+                # nvidia DKMS build from failing mid-install. Run dkms autoinstall explicitly after.
+                # Unset ARCH because Earthly sets ARCH=amd64 (Debian naming) which breaks nvidia's
+                # DKMS Makefile that expects x86_64 (kernel naming).
+                RUN kernel=$(printf '%s\n' /lib/modules/* | xargs -n1 basename | sort -V | tail -1) && \
+                    if ! ls /usr/src | grep linux-headers-$kernel; then \
+                        chmod -x /etc/kernel/header_postinst.d/dkms 2>/dev/null || true && \
+                        apt-get update && apt-get install -y "linux-headers-${kernel}" && \
+                        chmod +x /etc/kernel/header_postinst.d/dkms 2>/dev/null || true; \
+                    fi && \
+                    unset ARCH && (dkms autoinstall -k "$kernel" || true) && \
+                    echo "DKMS status:" && dkms status && \
+                    for mod in nvidia mlnx-ofed-kernel; do \
+                        if dkms status | grep -q "^${mod}.*installed"; then \
+                            echo "OK: $mod installed"; \
+                        else \
+                            echo "ERROR: required DKMS module $mod not in 'installed' state"; exit 1; \
+                        fi; \
+                    done
+            ELSE
+                RUN kernel=$(printf '%s\n' /lib/modules/* | xargs -n1 basename | sort -V | tail -1) && if ! ls /usr/src | grep linux-headers-$kernel; then apt-get update && apt-get install -y "linux-headers-${kernel}"; fi
+            END
         END
     ELSE IF [ "$K8S_DISTRIBUTION" = "k3s" ]
         ARG K8S_DISTRIBUTION_TAG=$K3S_FLAVOR_TAG
@@ -683,15 +705,11 @@ kairos-provider-image:
 
 # base build image used to create the base image for all other image types
 base-image:
-    # When DOCA_DEB_PATH or BFB_PATH is a URL, set the LOCAL variant to /dev/null
+    # When BFB_PATH is a URL, set the LOCAL variant to .empty-placeholder
     # so the Dockerfile COPY instruction doesn't try to copy a URL as a file path.
     # The Dockerfile RUN will then use curl to fetch the URL instead.
-    LET DOCA_DEB_LOCAL=.empty-placeholder
     LET BFB_LOCAL=.empty-placeholder
     IF [ "$EDGE_APPLIANCE" = "true" ]
-        IF [ -n "$DOCA_DEB_PATH" ] && ! echo "$DOCA_DEB_PATH" | grep -q '^https\?://'
-            SET DOCA_DEB_LOCAL=$DOCA_DEB_PATH
-        END
         IF [ -n "$BFB_PATH" ] && ! echo "$BFB_PATH" | grep -q '^https\?://'
             SET BFB_LOCAL=$BFB_PATH
         END
@@ -700,8 +718,8 @@ base-image:
     --build-arg OS_DISTRIBUTION=$OS_DISTRIBUTION --build-arg OS_VERSION=$OS_VERSION \
     --build-arg HTTP_PROXY=$HTTP_PROXY --build-arg HTTPS_PROXY=$HTTPS_PROXY \
     --build-arg NO_PROXY=$NO_PROXY --build-arg DRBD_VERSION=$DRBD_VERSION \
-    --build-arg EDGE_APPLIANCE=$EDGE_APPLIANCE --build-arg DOCA_DEB_PATH=$DOCA_DEB_PATH \
-    --build-arg DOCA_DEB_LOCAL=$DOCA_DEB_LOCAL --build-arg BFB_PATH=$BFB_PATH \
+    --build-arg EDGE_APPLIANCE=$EDGE_APPLIANCE --build-arg DOCA_VERSION=$DOCA_VERSION \
+    --build-arg BFB_PATH=$BFB_PATH \
     --build-arg BFB_LOCAL=$BFB_LOCAL --build-arg BFB_FILENAME=$BFB_FILENAME .
 
     IF [ "$IS_JETSON" = "true" ]
@@ -734,6 +752,13 @@ base-image:
                 if dpkg -l linux-image-generic > /dev/null; then apt-mark hold linux-image-generic linux-headers-generic linux-generic; fi
         ELSE
             SET APT_UPGRADE_FLAGS="-y --with-new-pkgs"
+            # When upgrading kernel on Edge Appliance builds, unhold kernel packages
+            # that the Dockerfile held to protect DOCA during apt-get upgrade.
+            IF [ "$EDGE_APPLIANCE" = "true" ]
+                RUN apt-mark unhold linux-image-generic linux-headers-generic linux-generic \
+                    linux-image-generic-hwe-$OS_VERSION linux-headers-generic-hwe-$OS_VERSION linux-generic-hwe-$OS_VERSION \
+                    $(dpkg -l | awk '/^hi\s+linux-(headers|image|modules)-[0-9]/ {print $2}') 2>/dev/null || true
+            END
             RUN DEBIAN_FRONTEND=noninteractive apt-get update && \
                 apt-get install -y linux-image-generic-hwe-$OS_VERSION
         END

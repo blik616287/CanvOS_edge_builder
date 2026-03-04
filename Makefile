@@ -39,19 +39,17 @@ UPDATE_KERNEL     ?= false
 
 # Edge Appliance settings
 EDGE_APPLIANCE    ?= true
+DOCA_VERSION      ?= 3.3.0
 
 # Firmware file names (used for local redist/ builds)
-DOCA_DEB_NAME     := doca-host_3.2.1-044000-25.10-ubuntu2404_amd64.deb
 BFB_NAME          := bf-bundle-3.2.1-34_25.11_ubuntu-24.04_64k_prod.bfb
 
 # Firmware download URLs
-DOCA_DEB_URL      := https://github.com/blik616287/CanvOS_edge_builder/releases/download/doca-host-3.2.1-044000/$(DOCA_DEB_NAME)
-BFB_URL           := https://github.com/blik616287/CanvOS_edge_builder/releases/download/bf-bundle-3.2.1-34/$(BFB_NAME)
+BFB_URL           := https://content.mellanox.com/BlueField/BFBs/Ubuntu24.04/$(BFB_NAME)
 
-# DOCA_DEB_FILE and BFB_FILE control what the build uses:
+# BFB_FILE controls what the build uses:
 #   - Default: local filename (from redist/)
 #   - Override with URL: make build-url
-DOCA_DEB_FILE     ?= $(DOCA_DEB_NAME)
 BFB_FILE          ?= $(BFB_NAME)
 
 # Derived values (must match PE_VERSION in src/Earthfile)
@@ -72,7 +70,8 @@ OVERLAY_FILES := \
 	overlay/files/etc/modprobe.d/ib_core.conf \
 	overlay/files/etc/lldpd.d/rcp-lldpd.conf \
 	overlay/files/etc/modules-load.d/nfsrdma.conf \
-	hack/launch-qemu.sh
+	hack/launch-qemu.sh \
+	hack/smoke-test-auto.sh
 
 ##@ Help
 .PHONY: help
@@ -115,18 +114,8 @@ setup-firmware: ## Copy redist/ firmware into CanvOS/ (skipped for URLs or non-E
 	@if [ "$(EDGE_APPLIANCE)" != "true" ]; then \
 		echo "  [SKIP] EDGE_APPLIANCE is not true — no firmware needed"; \
 	else \
-		case "$(DOCA_DEB_FILE)" in \
-			http://*|https://*) echo "  [SKIP] DOCA — URL, downloaded during build" ;; \
-			*) \
-				if [ -f "$(REDIST_DIR)/$(DOCA_DEB_FILE)" ]; then \
-					cp "$(REDIST_DIR)/$(DOCA_DEB_FILE)" "$(CANVOS_DIR)/$(DOCA_DEB_FILE)"; \
-					echo "  [OK] $(DOCA_DEB_FILE)"; \
-				else \
-					echo "  [FAIL] redist/$(DOCA_DEB_FILE) not found"; \
-					echo "         Download to redist/ from: https://www.mellanox.com/downloads/DOCA/DOCA_v3.2.1/host/"; \
-					exit 1; \
-				fi ;; \
-		esac; \
+		echo "  [INFO] DOCA $(DOCA_VERSION) — installed from NVIDIA apt repo during build"; \
+		echo "  [INFO] nvidia-open — installed from CUDA apt repo during build"; \
 		case "$(BFB_FILE)" in \
 			http://*|https://*) echo "  [SKIP] BFB — URL, downloaded during build" ;; \
 			*) \
@@ -142,16 +131,10 @@ setup-firmware: ## Copy redist/ firmware into CanvOS/ (skipped for URLs or non-E
 	fi
 
 .PHONY: download
-download: ## Download firmware files to redist/
+download: ## Download BFB firmware to redist/ (DOCA installed from NVIDIA apt repo)
 	@mkdir -p $(REDIST_DIR)
 	@echo "=== Downloading firmware to redist/ ==="
-	@if [ -f "$(REDIST_DIR)/$(DOCA_DEB_NAME)" ]; then \
-		echo "  [SKIP] $(DOCA_DEB_NAME) already exists ($$(du -h "$(REDIST_DIR)/$(DOCA_DEB_NAME)" | cut -f1))"; \
-	else \
-		echo "  Downloading $(DOCA_DEB_NAME)..."; \
-		curl -fSL -o "$(REDIST_DIR)/$(DOCA_DEB_NAME)" "$(DOCA_DEB_URL)"; \
-		echo "  [OK] $(DOCA_DEB_NAME) ($$(du -h "$(REDIST_DIR)/$(DOCA_DEB_NAME)" | cut -f1))"; \
-	fi
+	@echo "  [INFO] DOCA $(DOCA_VERSION) — installed from NVIDIA apt repo during build (no download needed)"
 	@if [ -f "$(REDIST_DIR)/$(BFB_NAME)" ]; then \
 		echo "  [SKIP] $(BFB_NAME) already exists ($$(du -h "$(REDIST_DIR)/$(BFB_NAME)" | cut -f1))"; \
 	else \
@@ -180,7 +163,7 @@ configure: ## Generate CanvOS/.arg configured for Edge Appliance build
 	echo "EDGE_CUSTOM_CONFIG=.edge-custom-config.yaml"; \
 	echo "FORCE_INTERACTIVE_INSTALL=false"; \
 	echo "EDGE_APPLIANCE=$(EDGE_APPLIANCE)"; \
-	echo "DOCA_DEB_PATH=$(DOCA_DEB_FILE)"; \
+	echo "DOCA_VERSION=$(DOCA_VERSION)"; \
 	echo "BFB_PATH=$(BFB_FILE)"; \
 	echo "BFB_FILENAME=$(shell basename $(BFB_FILE))"; \
 	} > $(ARG_FILE)
@@ -204,7 +187,8 @@ info: ## Show current build configuration
 	@echo "  Provider Image:   $(PROVIDER_IMAGE)"
 	@echo "  Installer ISO:    $(BUILD_DIR)/$(ISO_NAME).iso"
 	@echo ""
-	@echo "  DOCA deb:         $(DOCA_DEB_FILE)"
+	@echo "  DOCA:             $(DOCA_VERSION) (from NVIDIA apt repo)"
+	@echo "  GPU driver:       nvidia-open (from CUDA apt repo)"
 	@echo "  BFB firmware:     $(BFB_FILE)"
 	@echo ""
 	@echo "  src/ files:"
@@ -217,15 +201,6 @@ info: ## Show current build configuration
 	done
 	@echo ""
 	@echo "  Firmware:"
-	@case "$(DOCA_DEB_FILE)" in \
-		http://*|https://*) echo "    [URL] $(DOCA_DEB_FILE)" ;; \
-		*) \
-			if [ -f "$(REDIST_DIR)/$(DOCA_DEB_FILE)" ]; then \
-				echo "    [OK] redist/$(DOCA_DEB_FILE) ($$(du -h "$(REDIST_DIR)/$(DOCA_DEB_FILE)" | cut -f1))"; \
-			else \
-				echo "    [MISSING] redist/$(DOCA_DEB_FILE)"; \
-			fi ;; \
-	esac
 	@case "$(BFB_FILE)" in \
 		http://*|https://*) echo "    [URL] $(BFB_FILE)" ;; \
 		*) \
@@ -281,17 +256,8 @@ check-prereqs: ## Verify all build prerequisites
 	done; \
 	echo ""; \
 	echo "Firmware:"; \
-	case "$(DOCA_DEB_FILE)" in \
-		http://*|https://*) echo "  [OK] DOCA: URL (downloaded during build)" ;; \
-		*) \
-			if [ -f "$(REDIST_DIR)/$(DOCA_DEB_FILE)" ]; then \
-				echo "  [OK] redist/$(DOCA_DEB_FILE) ($$(du -h "$(REDIST_DIR)/$(DOCA_DEB_FILE)" | cut -f1))"; \
-			else \
-				echo "  [FAIL] redist/$(DOCA_DEB_FILE) not found"; \
-				echo "         Download to redist/ from: https://www.mellanox.com/downloads/DOCA/DOCA_v3.2.1/host/"; \
-				PASS=false; \
-			fi ;; \
-	esac; \
+	echo "  [OK] DOCA $(DOCA_VERSION): installed from NVIDIA apt repo during build"; \
+	echo "  [OK] nvidia-open: installed from CUDA apt repo during build"; \
 	case "$(BFB_FILE)" in \
 		http://*|https://*) echo "  [OK] BFB: URL (downloaded during build)" ;; \
 		*) \
@@ -378,11 +344,11 @@ build-local: download build ## Download firmware to redist/, then build from loc
 
 .PHONY: build-url
 build-url: ## Build using URLs (no local firmware needed)
-	@$(MAKE) --no-print-directory build DOCA_DEB_FILE=$(DOCA_DEB_URL) BFB_FILE=$(BFB_URL)
+	@$(MAKE) --no-print-directory build BFB_FILE=$(BFB_URL)
 
 .PHONY: push-url
 push-url: ## Build and push using URLs
-	@$(MAKE) --no-print-directory push DOCA_DEB_FILE=$(DOCA_DEB_URL) BFB_FILE=$(BFB_URL)
+	@$(MAKE) --no-print-directory push BFB_FILE=$(BFB_URL)
 
 ##@ Verification
 .PHONY: verify
@@ -434,17 +400,48 @@ verify: ## Verify built image contents (DOCA, BFB, nodeprep, overlays)
 		echo "  [FAIL] gcc-$$GCC_VER not found"; PASS=false; \
 	fi; \
 	echo ""; \
-	echo "--- Kernel (should be GA, not HWE) ---"; \
+	echo "--- Kernel version ---"; \
 	KVER=$$(docker run --rm $(PROVIDER_IMAGE) ls /lib/modules/ 2>/dev/null | head -1); \
 	echo "  Kernel modules: $$KVER"; \
-	if echo "$$KVER" | grep -qE "^6\.(8|5)\."; then \
-		echo "  [OK] GA kernel"; \
-	elif echo "$$KVER" | grep -qE "^6\.1[0-9]\."; then \
-		echo "  [WARN] HWE kernel detected — DOCA DKMS may not work"; \
+	if [ "$(EDGE_APPLIANCE)" = "true" ]; then \
+		if echo "$$KVER" | grep -qE "^6\.(14|17)\."; then \
+			echo "  [OK] Kernel $$KVER (DOCA $(DOCA_VERSION) DKMS compatible)"; \
+		else \
+			echo "  [WARN] Untested kernel for Edge Appliance: $$KVER"; \
+		fi; \
 	else \
-		echo "  [INFO] Kernel version: $$KVER"; \
+		if echo "$$KVER" | grep -qE "^6\.(8|5|14)\."; then \
+			echo "  [OK] Kernel $$KVER"; \
+		elif echo "$$KVER" | grep -qE "^6\.1[0-9]\."; then \
+			echo "  [WARN] HWE kernel detected — DOCA DKMS may not work"; \
+		else \
+			echo "  [INFO] Kernel version: $$KVER"; \
+		fi; \
 	fi; \
 	echo ""; \
+	if [ "$(EDGE_APPLIANCE)" = "true" ]; then \
+		echo "--- NVIDIA GPU driver ---"; \
+		if docker run --rm $(PROVIDER_IMAGE) dpkg -l nvidia-driver-580-open 2>/dev/null | grep -q "^ii"; then \
+			NVER=$$(docker run --rm $(PROVIDER_IMAGE) dpkg -l nvidia-driver-580-open 2>/dev/null | awk '/^ii/{print $$3}'); \
+			echo "  [OK] nvidia-driver-580-open $$NVER"; \
+		else \
+			echo "  [FAIL] nvidia-driver-580-open not found"; PASS=false; \
+		fi; \
+		echo ""; \
+		echo "--- DKMS modules ---"; \
+		DKMS_OUT=$$(docker run --rm $(PROVIDER_IMAGE) dkms status 2>/dev/null); \
+		if [ -n "$$DKMS_OUT" ]; then \
+			echo "$$DKMS_OUT" | sed 's/^/  /'; \
+			if echo "$$DKMS_OUT" | grep -q "installed"; then \
+				echo "  [OK] DKMS modules installed"; \
+			else \
+				echo "  [WARN] DKMS modules present but not in 'installed' state"; \
+			fi; \
+		else \
+			echo "  [WARN] No DKMS modules found"; \
+		fi; \
+		echo ""; \
+	fi; \
 	if [ "$$PASS" = "true" ]; then \
 		echo "All verifications passed."; \
 	else \
@@ -484,7 +481,15 @@ smoke-test: ## Launch QEMU VM from installer ISO for smoke testing
 	@echo "  Boot the VM in 'Kairos (manual)' mode to test nodeprep."
 	@echo "  Press Ctrl+A X to exit QEMU."
 	@echo ""
-	cd $(CANVOS_DIR)/hack && ./launch-qemu.sh $(CURDIR)/$(BUILD_DIR)/$(ISO_NAME).iso
+	cd $(CANVOS_DIR)/hack && ./launch-qemu.sh $(BUILD_DIR)/$(ISO_NAME).iso
+
+.PHONY: smoke-test-auto
+smoke-test-auto: ## Automated QEMU smoke test (non-interactive, pass/fail)
+	@if [ ! -f "$(BUILD_DIR)/$(ISO_NAME).iso" ]; then \
+		echo "[FAIL] $(BUILD_DIR)/$(ISO_NAME).iso not found — run 'make build' or 'make build-iso' first"; \
+		exit 1; \
+	fi
+	$(SRC_DIR)/hack/smoke-test-auto.sh $(BUILD_DIR)/$(ISO_NAME).iso
 
 ##@ Cleanup
 .PHONY: clean
@@ -509,7 +514,7 @@ clean: ## Full cleanup: build artifacts, images, redist/, revert CanvOS/
 	@rm -f $(CANVOS_DIR)/overlay/files/etc/lldpd.d/rcp-lldpd.conf
 	@rm -f $(CANVOS_DIR)/overlay/files/etc/modules-load.d/nfsrdma.conf
 	@rm -f $(CANVOS_DIR)/.arg
-	@rm -f $(CANVOS_DIR)/$(DOCA_DEB_NAME) $(CANVOS_DIR)/$(BFB_NAME)
+	@rm -f $(CANVOS_DIR)/$(BFB_NAME)
 	@rm -f $(CANVOS_DIR)/EDGE-APPLIANCE-BUILD.md $(CANVOS_DIR)/CLAUDE.md
 	@echo "  CanvOS/ reverted to upstream."
 	@echo ""

@@ -8,7 +8,7 @@ ARG HTTP_PROXY
 ARG HTTPS_PROXY
 ARG NO_PROXY
 ARG EDGE_APPLIANCE
-ARG DOCA_DEB_PATH
+ARG DOCA_VERSION
 ARG BFB_PATH
 ARG BFB_FILENAME
 
@@ -46,6 +46,8 @@ RUN if [ "${EDGE_APPLIANCE}" = "true" ] && [ "${OS_DISTRIBUTION}" = "ubuntu" ]; 
     apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         $GCC_PKG \
+        dkms \
+        make \
         lldpd \
         netplan.io \
         pv \
@@ -56,39 +58,39 @@ RUN if [ "${EDGE_APPLIANCE}" = "true" ] && [ "${OS_DISTRIBUTION}" = "ubuntu" ]; 
     rm -rf /var/lib/apt/lists/*; \
     fi
 
-# Install DOCA host package (registers DOCA apt repo, then installs doca-all with all components)
+# Install DOCA from NVIDIA apt repository.
 # After DOCA install, hold kernel-related packages to prevent conflicts with the Earthfile's
 # apt-get upgrade step in +base-image, which would otherwise try to upgrade kernel headers
 # and break DOCA's DKMS module dependencies.
-#
-# DOCA_DEB_PATH accepts a local file path OR a URL (http:// / https://).
-# When a URL is provided, DOCA_DEB_LOCAL must be set to .empty-placeholder so COPY doesn't fail.
-# When a local file is provided, DOCA_DEB_LOCAL should equal DOCA_DEB_PATH.
-ARG DOCA_DEB_LOCAL
-COPY ${DOCA_DEB_LOCAL:-.empty-placeholder} /tmp/doca-host-local.deb
 RUN if [ "${EDGE_APPLIANCE}" = "true" ] && [ "${OS_DISTRIBUTION}" = "ubuntu" ]; then \
-    case "${DOCA_DEB_PATH}" in \
-        http://*|https://*) \
-            echo "Downloading DOCA .deb from ${DOCA_DEB_PATH}..." && \
-            curl -fSL -o /tmp/doca-host.deb "${DOCA_DEB_PATH}" ;; \
-        *) \
-            if [ -f /tmp/doca-host-local.deb ] && [ -s /tmp/doca-host-local.deb ]; then \
-                mv /tmp/doca-host-local.deb /tmp/doca-host.deb; \
-            fi ;; \
-    esac && \
-    if [ -f /tmp/doca-host.deb ] && [ -s /tmp/doca-host.deb ]; then \
-        dpkg -i /tmp/doca-host.deb && \
-        rm /tmp/doca-host.deb && \
-        apt-get update && \
-        DEBIAN_FRONTEND=noninteractive apt-get install -y doca-all && \
-        apt-mark hold linux-headers-generic linux-image-generic \
-            $(dpkg -l | awk '/^ii\s+linux-(headers|image|modules)-[0-9]/ {print $2}') 2>/dev/null || true && \
-        apt-get clean && \
-        rm -rf /var/lib/apt/lists/*; \
-    else \
-        echo "ERROR: DOCA .deb not found (DOCA_DEB_PATH=${DOCA_DEB_PATH})"; exit 1; \
-    fi; \
-    else rm -f /tmp/doca-host-local.deb; fi
+    curl -fsSL https://linux.mellanox.com/public/repo/doca/GPG-KEY-Mellanox.pub \
+        | gpg --dearmor -o /usr/share/keyrings/mellanox.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/mellanox.gpg] https://linux.mellanox.com/public/repo/doca/${DOCA_VERSION}/ubuntu${OS_VERSION}/x86_64/ /" \
+        > /etc/apt/sources.list.d/doca.list && \
+    apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y doca-all && \
+    (apt-mark hold linux-headers-generic linux-image-generic \
+        linux-image-generic-hwe-${OS_VERSION} linux-headers-generic-hwe-${OS_VERSION} linux-generic-hwe-${OS_VERSION} \
+        $(dpkg -l | awk '/^ii\s+linux-(headers|image|modules)-[0-9]/ {print $2}') 2>/dev/null || true) && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*; \
+    fi
+
+# Install NVIDIA open-source GPU driver (580) for Blackwell RTX PRO 6000 support.
+# Blackwell requires nvidia-open (proprietary module doesn't support Blackwell's always-on GSP).
+# Pin to 580 branch — validated against kernel 6.14 on Ubuntu 24.04 by CUDA 13.1.
+# Note: kernel headers are installed later in the Earthfile +provider-image target,
+# which triggers DKMS autoinstall. We disable the DKMS hook here to avoid build failures
+# from missing headers; DKMS will build when headers are installed.
+RUN if [ "${EDGE_APPLIANCE}" = "true" ] && [ "${OS_DISTRIBUTION}" = "ubuntu" ]; then \
+    curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu$(echo ${OS_VERSION} | tr -d '.')/x86_64/cuda-keyring_1.1-1_all.deb \
+        -o /tmp/cuda-keyring.deb && \
+    dpkg -i /tmp/cuda-keyring.deb && rm /tmp/cuda-keyring.deb && \
+    apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nvidia-driver-580-open && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*; \
+    fi
 
 # Stage BFB firmware bundle for BlueField-3 adapters
 #
