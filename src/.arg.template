@@ -33,12 +33,13 @@ FORCE_INTERACTIVE_INSTALL=false
 # DRBD_VERSION=9.2.13  # This variable is required for Piraeus pack for drbd module installtion.
 
 # Edge Appliance Mode with DOCA/AI-RA-Infra support
-# Enables pre-installation of NVIDIA DOCA packages and BlueField firmware into the immutable OS image.
+# Enables pre-installation of NVIDIA DOCA packages, nvidia-open GPU driver,
+# and BlueField firmware into the immutable OS image.
 # UKI/Trusted Boot is NOT compatible with Edge Appliance Mode (DOCA makes images too large).
 # EDGE_APPLIANCE=true
-# DOCA_DEB_PATH and BFB_PATH accept local file paths or URLs (http:// / https://)
-# DOCA_DEB_PATH=doca-host_3.2.1-044000-25.10-ubuntu2404_amd64.deb
-# DOCA_DEB_PATH=https://www.mellanox.com/downloads/DOCA/DOCA_v3.2.1/host/doca-host_3.2.1-044000-25.10-ubuntu2404_amd64.deb
+# DOCA_VERSION=3.3.0                  # Installed from NVIDIA apt repo (linux.mellanox.com)
+# nvidia-open GPU driver installed from CUDA apt repo (Blackwell RTX PRO 6000 requires open-source module)
+# BFB_PATH accepts local file paths or URLs (http:// / https://)
 # BFB_PATH=bf-bundle-3.2.1-34_25.11_ubuntu-24.04_64k_prod.bfb
 # BFB_PATH=https://content.mellanox.com/BlueField/BFBs/bf-bundle-3.2.1-34_25.11_ubuntu-24.04_64k_prod.bfb
 # BFB_FILENAME=bf-bundle-3.2.1-34_25.11_ubuntu-24.04_64k_prod.bfb

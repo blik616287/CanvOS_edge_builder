@@ -10,17 +10,18 @@ All custom files live in `src/`. The Makefile applies them into a clean CanvOS c
 CanvOS_edge_builder/
 ├── Makefile              # Build orchestration
 ├── src/                  # Our modifications (tracked in git)
-│   ├── Dockerfile        # Modified — adds DOCA/BFB installation
+│   ├── Dockerfile        # Modified — adds DOCA/BFB/NVIDIA GPU driver installation
 │   ├── Earthfile         # Modified — passes Edge Appliance ARGs
 │   ├── .arg.template     # Modified — documents Edge Appliance variables
-│   └── overlay/files/    # Config overlays baked into the image
-│       ├── opt/spectrocloud/nodeprep.sh
-│       ├── etc/modprobe.d/blacklist-nouveau.conf
-│       ├── etc/modprobe.d/ib_core.conf
-│       ├── etc/lldpd.d/rcp-lldpd.conf
-│       └── etc/modules-load.d/nfsrdma.conf
+│   ├── overlay/files/    # Config overlays baked into the image
+│   │   ├── opt/spectrocloud/nodeprep.sh
+│   │   ├── etc/modprobe.d/blacklist-nouveau.conf
+│   │   ├── etc/modprobe.d/ib_core.conf
+│   │   ├── etc/lldpd.d/rcp-lldpd.conf
+│   │   └── etc/modules-load.d/nfsrdma.conf
 │   └── hack/
-│       └── launch-qemu.sh          # QEMU smoke test launcher
+│       ├── launch-qemu.sh          # QEMU interactive smoke test
+│       └── smoke-test-auto.sh      # Automated QEMU smoke test
 ├── redist/               # Local firmware downloads (gitignored)
 ├── build/                # Build output — ISO + checksums (gitignored)
 └── CanvOS/               # Upstream clone (gitignored)
@@ -85,7 +86,7 @@ make all         # check-prereqs → build → test
 | `make help` | Show all available targets |
 | `make info` | Show current build configuration |
 | `make check-prereqs` | Verify Docker, disk space, source files, firmware |
-| `make download` | Download DOCA .deb and BFB firmware to `redist/` |
+| `make download` | Download BFB firmware to `redist/` |
 | `make build` | Build provider image + installer ISO from local files |
 | `make build-url` | Build using firmware URLs (no local files needed) |
 | `make build-local` | Download firmware, then build from local files |
@@ -97,8 +98,12 @@ make all         # check-prereqs → build → test
 | `make verify` | Verify DOCA, BFB, nodeprep, overlays in the built image |
 | `make verify-iso` | Check that the installer ISO was created |
 | `make smoke-test` | Launch QEMU VM from installer ISO for interactive testing |
+| `make smoke-test-auto` | Automated QEMU smoke test (non-interactive, pass/fail) |
+| `make setup` | Apply src/ files into CanvOS/ only |
+| `make configure` | Generate CanvOS/.arg configuration file only |
 | `make clean` | Full cleanup: build artifacts, images, redist/, revert CanvOS/ |
 | `make clean-earthly` | Remove Earthly buildkit container and cache |
+| `make all` | Full pipeline: check-prereqs → build → test |
 
 ## Build Configuration
 
@@ -118,16 +123,15 @@ make build K8S_VERSION=1.34.2 IMAGE_REGISTRY=myregistry.io CUSTOM_TAG=v1
 | `IMAGE_REGISTRY` | `ttl.sh` | Container registry for provider image |
 | `CUSTOM_TAG` | `demo` | Image tag suffix |
 | `EDGE_APPLIANCE` | `true` | Enable DOCA/BFB pre-installation |
+| `DOCA_VERSION` | `3.3.0` | DOCA version (installed from NVIDIA apt repo) |
 | `UPDATE_KERNEL` | `false` | Must be false — HWE kernel breaks DOCA DKMS |
 
 ### Firmware URLs
 
-The default firmware URLs point to GitHub releases. Override them if needed:
+DOCA is installed from the NVIDIA apt repository (`linux.mellanox.com`) during build. BFB firmware is downloaded from the official [Mellanox BFB repository](https://content.mellanox.com/BlueField/BFBs/). Override the URL if needed:
 
 ```bash
-make build-url \
-  DOCA_DEB_URL=https://example.com/doca-host.deb \
-  BFB_URL=https://example.com/bf-bundle.bfb
+make build-url BFB_URL=https://example.com/bf-bundle.bfb
 ```
 
 ## Build Output
@@ -152,6 +156,7 @@ When `EDGE_APPLIANCE=true`, the Dockerfile installs:
 | `pv`, `psmisc` | Process monitoring utilities |
 | `nfs-common` | NFS client for Longhorn and NFSoRDMA |
 | `grepcidr` | CIDR matching for IP selection |
+| `nvidia-driver-580-open` | NVIDIA open-source GPU driver (required for Blackwell RTX PRO 6000) |
 
 Additionally staged in the image:
 - BFB firmware at `/opt/spectrocloud/spcx/bfb/<filename>`
@@ -180,7 +185,9 @@ Baked into the immutable rootfs via `src/overlay/files/`:
 
 ## QEMU Smoke Testing
 
-The `make smoke-test` target boots the installer ISO in a local QEMU VM for interactive verification. Requires KVM and QEMU installed on the host.
+Requires KVM and QEMU installed on the host. Two modes are available:
+
+### Interactive smoke test
 
 ```bash
 make build-iso    # Build the installer ISO first
@@ -189,19 +196,33 @@ make smoke-test   # Launch QEMU VM
 
 The VM boots into the Kairos live environment with serial console. Use `Ctrl+A X` to exit QEMU.
 
-What to verify in the QEMU smoke test:
+What to verify in the interactive smoke test:
 - VM reaches the Kairos login prompt ("Welcome to Kairos!")
 - `kairos-agent.service` and `kairos-installer.service` start
 - `lldpd.service` starts (confirms overlay config)
 - `mst start` fails gracefully when no NVIDIA hardware is present (expected in QEMU)
 
-The QEMU script lives at `src/hack/launch-qemu.sh` and is overlaid into `CanvOS/hack/` at build time. It can be customized via environment variables:
+### Automated smoke test
+
+```bash
+make smoke-test-auto   # Non-interactive, reports PASS/FAIL per check
+```
+
+Boots the ISO in QEMU, selects "manual" mode via GRUB, logs in as root, and runs checks for: kernel version, NVIDIA driver, DKMS modules, Kairos immutable OS, DOCA packages, BFB firmware, nodeprep.sh, overlay configs, GCC, and systemd health.
+
+Exit codes: `0` = all passed, `1` = one or more failed, `2` = boot timeout or QEMU error.
+
+### QEMU configuration
+
+Both smoke test scripts can be customized via environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MEMORY` | `10096` | VM memory in MB |
 | `CORES` | `5` | Number of CPU cores |
 | `CPU` | `host` | CPU model |
+| `BOOT_TIMEOUT` | `300` | Seconds to wait for boot (automated only) |
+| `TEST_TIMEOUT` | `120` | Seconds to wait for test results (automated only) |
 
 ## Standard vs Edge Appliance Builds
 
@@ -272,7 +293,7 @@ The target profile stack (AI-RA-Infra-Agent):
 
 ### Known Constraints
 
-- **DOCA kernel compatibility**: DOCA 3.2.1 DKMS modules require the GA kernel (6.8.x on Ubuntu 24.04). The HWE kernel (6.14.x) is not supported. `UPDATE_KERNEL=false` prevents this.
+- **DOCA kernel compatibility**: DOCA 3.3.0 DKMS modules require the GA kernel (6.8.x / 6.14.x on Ubuntu 24.04). The HWE kernel is not supported. `UPDATE_KERNEL=false` prevents this.
 - **No UKI/Trusted Boot**: The Edge Appliance image (~7 GB) far exceeds UKI/EFI partition limits (~1 GB). Grub-based boot is required.
 - **Ubuntu version must match**: The DOCA .deb and BFB firmware are version-specific. A 22.04 .deb will not work on a 24.04 image.
 - **Image size**: Edge Appliance images are significantly larger than standard CanvOS images (~7 GB vs ~3.5 GB) due to DOCA packages and 1.5 GB BFB firmware.
