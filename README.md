@@ -297,3 +297,7 @@ The target profile stack (AI-RA-Infra-Agent):
 - **No UKI/Trusted Boot**: The Edge Appliance image (~7 GB) far exceeds UKI/EFI partition limits (~1 GB). Grub-based boot is required.
 - **Ubuntu version must match**: The DOCA .deb and BFB firmware are version-specific. A 22.04 .deb will not work on a 24.04 image.
 - **Image size**: Edge Appliance images are significantly larger than standard CanvOS images (~7 GB vs ~3.5 GB) due to DOCA packages and 1.5 GB BFB firmware.
+
+## License
+
+[MIT](LICENSE) © 2026 Martin Forde <mforde84@gmail.com>, [Blik Labs](https://bliklabs.com).
